@@ -1,5 +1,3 @@
-import discord
-from discord.ext import commands
 from discord.ui import Button, View, Select, Modal, TextInput
 import json
 import os
@@ -26,8 +24,7 @@ def load_config():
             return json.load(f)
     return {
         'categoria_id': None,
-        'pix_chave': 'Configure sua chave PIX com o comando .setup',
-        'canal_vendas_id': None,
+        'pix_info': 'Configure seu PIX com o comando .ConfigPix',
         'contador_carrinhos': {}
     }
 
@@ -62,11 +59,23 @@ produtos_drop = load_produtos_drop()
 # Verificar se é dono do servidor ou administrador
 def is_owner_or_admin():
     async def predicate(ctx):
+        # Verifica se é o dono do servidor
         if ctx.author.id == ctx.guild.owner_id:
             return True
+        
+        # Verifica se tem permissão de administrador
         if ctx.author.guild_permissions.administrator:
             return True
+        
+        # Se não for nenhum dos dois, retorna False
         return False
+    
+    return commands.check(predicate)
+
+# Verificar se é dono do servidor
+def is_owner():
+    async def predicate(ctx):
+        return ctx.author.id == ctx.guild.owner_id
     return commands.check(predicate)
 
 # Evento quando o bot está pronto
@@ -91,7 +100,7 @@ async def on_command_error(ctx, error):
         embed.set_footer(text="Apenas membros autorizados podem gerenciar o bot")
         await ctx.send(embed=embed, delete_after=10)
     elif isinstance(error, commands.CommandNotFound):
-        pass
+        pass  # Ignora comandos não encontrados
     else:
         print(f"Erro: {error}")
 
@@ -106,14 +115,12 @@ async def setup(ctx):
     )
     
     categoria_status = "✅ Configurada" if config.get('categoria_id') else "❌ Não configurada"
-    pix_status = "✅ Configurado" if config.get('pix_chave') != 'Configure sua chave PIX com o comando .setup' else "❌ Não configurado"
-    canal_vendas_status = "✅ Configurado" if config.get('canal_vendas_id') else "❌ Não configurado"
+    pix_status = "✅ Configurado" if config.get('pix_info') != 'Configure seu PIX com o comando .ConfigPix' else "❌ Não configurado"
     produtos_count = len(produtos)
     produtos_drop_count = len(produtos_drop)
     
     embed.add_field(name="📁 Categoria", value=categoria_status, inline=True)
     embed.add_field(name="💳 PIX", value=pix_status, inline=True)
-    embed.add_field(name="📢 Canal de Vendas", value=canal_vendas_status, inline=True)
     embed.add_field(name="📦 Produtos", value=f"{produtos_count} cadastrados", inline=True)
     embed.add_field(name="📋 Produtos Drop", value=f"{produtos_drop_count} cadastrados", inline=True)
     
@@ -122,7 +129,6 @@ async def setup(ctx):
     # Criar botões
     btn_categoria = Button(label="📁 Configurar Categoria", style=discord.ButtonStyle.primary, row=0)
     btn_pix = Button(label="💳 Configurar PIX", style=discord.ButtonStyle.primary, row=0)
-    btn_canal_vendas = Button(label="📢 Canal de Vendas", style=discord.ButtonStyle.primary, row=0)
     
     btn_criar_produto = Button(label="➕ Criar Produto", style=discord.ButtonStyle.success, row=1)
     btn_criar_drop = Button(label="📋 Criar Produto Drop", style=discord.ButtonStyle.success, row=1)
@@ -201,22 +207,22 @@ async def setup(ctx):
         modal = Modal(title="Configurar PIX")
         
         pix_input = TextInput(
-            label="Chave PIX",
-            placeholder="Ex: seuemail@exemplo.com ou CPF ou telefone",
-            style=discord.TextStyle.short,
-            max_length=200,
-            default=config.get('pix_chave', '')
+            label="Informações do PIX",
+            placeholder="Ex: Chave PIX: seuemail@exemplo.com\nTitular: Seu Nome",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+            default=config.get('pix_info', '')
         )
         
         modal.add_item(pix_input)
         
         async def on_submit(modal_interaction):
-            config['pix_chave'] = pix_input.value
+            config['pix_info'] = pix_input.value
             save_config(config)
             
             embed_pix = discord.Embed(
                 title="✅ PIX Configurado",
-                description=f"Chave PIX atualizada:\n```{pix_input.value}```",
+                description="Informações do PIX atualizadas com sucesso!",
                 color=discord.Color.green()
             )
             
@@ -224,54 +230,6 @@ async def setup(ctx):
         
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
-    
-    async def canal_vendas_callback(interaction):
-        if not check_permissions(interaction):
-            await interaction.response.send_message(
-                "❌ Você precisa ser Administrador ou Dono do Servidor!",
-                ephemeral=True
-            )
-            return
-        
-        canais = [ch for ch in interaction.guild.text_channels]
-        
-        if not canais:
-            await interaction.response.send_message("❌ Nenhum canal encontrado!", ephemeral=True)
-            return
-        
-        options = [
-            discord.SelectOption(label=ch.name, value=str(ch.id), description=f"#{ch.name}")
-            for ch in canais[:25]
-        ]
-        
-        select = Select(placeholder="Escolha o canal de notificações...", options=options)
-        
-        async def select_callback(select_interaction):
-            if not check_permissions(select_interaction):
-                await select_interaction.response.send_message(
-                    "❌ Você precisa ser Administrador ou Dono do Servidor!",
-                    ephemeral=True
-                )
-                return
-            
-            config['canal_vendas_id'] = int(select.values[0])
-            save_config(config)
-            await select_interaction.response.send_message(
-                f"✅ Canal de vendas configurado: <#{select.values[0]}>",
-                ephemeral=True
-            )
-        
-        select.callback = select_callback
-        view_select = View()
-        view_select.add_item(select)
-        
-        embed_canal = discord.Embed(
-            title="📢 Configurar Canal de Vendas",
-            description="Selecione o canal onde as vendas aprovadas serão notificadas:",
-            color=discord.Color.green()
-        )
-        
-        await interaction.response.send_message(embed=embed_canal, view=view_select, ephemeral=True)
     
     async def criar_produto_callback(interaction):
         if not check_permissions(interaction):
@@ -633,7 +591,6 @@ async def setup(ctx):
     # Atribuir callbacks
     btn_categoria.callback = categoria_callback
     btn_pix.callback = pix_callback
-    btn_canal_vendas.callback = canal_vendas_callback
     btn_criar_produto.callback = criar_produto_callback
     btn_criar_drop.callback = criar_drop_callback
     btn_editar_produto.callback = editar_produto_callback
@@ -647,7 +604,6 @@ async def setup(ctx):
     view = View(timeout=None)
     view.add_item(btn_categoria)
     view.add_item(btn_pix)
-    view.add_item(btn_canal_vendas)
     view.add_item(btn_criar_produto)
     view.add_item(btn_criar_drop)
     view.add_item(btn_editar_produto)
@@ -684,6 +640,51 @@ async def ajuda(ctx):
     embed.set_footer(text=f"Solicitado por: {ctx.author.name} | Use .setup para gerenciar tudo facilmente!")
     
     await ctx.send(embed=embed)
+
+# Comando para configurar categoria
+@bot.command(name='ConfigCategoria')
+@is_owner_or_admin()
+async def config_categoria(ctx):
+    embed = discord.Embed(
+        title="⚙️ Configurar Categoria",
+        description="Selecione a categoria onde os carrinhos serão criados:",
+        color=discord.Color.green()
+    )
+    
+    categorias = [cat for cat in ctx.guild.categories]
+    
+    if not categorias:
+        await ctx.send("❌ Nenhuma categoria encontrada no servidor!")
+        return
+    
+    options = [
+        discord.SelectOption(label=cat.name, value=str(cat.id), description=f"ID: {cat.id}")
+        for cat in categorias[:25]
+    ]
+    
+    select = Select(placeholder="Escolha uma categoria...", options=options)
+    
+    async def select_callback(interaction):
+        # Verificar permissão na interação
+        if interaction.user.id != ctx.guild.owner_id and not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "❌ Você precisa ser Administrador ou Dono do Servidor!",
+                ephemeral=True
+            )
+            return
+        
+        config['categoria_id'] = int(select.values[0])
+        save_config(config)
+        await interaction.response.send_message(
+            f"✅ Categoria configurada: <#{select.values[0]}>",
+            ephemeral=True
+        )
+    
+    select.callback = select_callback
+    view = View()
+    view.add_item(select)
+    
+    await ctx.send(embed=embed, view=view)
 
 # Modal para criar produto
 class CriarProdutoModal(Modal):
@@ -1285,7 +1286,7 @@ async def criar_carrinho(interaction, produto, prod_id):
     
     aprovar_btn = Button(label="✅ Aprovar Pagamento", style=discord.ButtonStyle.success)
     fechar_btn = Button(label="🔒 Fechar", style=discord.ButtonStyle.danger)
-    pix_btn = Button(label="💳 Ver PIX", style=discord.ButtonStyle.primary)
+    pix_btn = Button(label="💳 PIX", style=discord.ButtonStyle.primary)
     
     async def aprovar_callback(btn_interaction):
         if btn_interaction.user.id != guild.owner_id and not btn_interaction.user.guild_permissions.administrator:
@@ -1294,20 +1295,6 @@ async def criar_carrinho(interaction, produto, prod_id):
                 ephemeral=True
             )
             return
-        
-        # Enviar notificação no canal de vendas
-        if config.get('canal_vendas_id'):
-            canal_vendas = guild.get_channel(config['canal_vendas_id'])
-            if canal_vendas:
-                embed_venda = discord.Embed(
-                    title="💰 NOVA VENDA APROVADA!",
-                    description=f"**Produto:** {produto['titulo']}\n**Preço:** R$ {produto['preco']}\n**Cliente:** {user.mention}",
-                    color=discord.Color.green(),
-                    timestamp=datetime.now()
-                )
-                embed_venda.set_footer(text=f"Venda aprovada por {btn_interaction.user.name}")
-                
-                await canal_vendas.send(embed=embed_venda)
         
         await btn_interaction.response.send_message(
             f"✅ Pagamento aprovado! {user.mention}, obrigado pela compra! 🎉"
@@ -1326,16 +1313,14 @@ async def criar_carrinho(interaction, produto, prod_id):
         await canal.delete()
     
     async def pix_callback(btn_interaction):
-        chave_pix = config.get('pix_chave', 'Configure o PIX com .setup')
-        
         embed_pix = discord.Embed(
-            title="💳 Pagamento PIX",
-            description=f"**Valor:** R$ {produto['preco']}\n\n**Chave PIX:**\n```{chave_pix}```\n\n📋 Copie a chave acima e realize o pagamento.\n📸 Após pagar, envie o comprovante neste canal.",
+            title="💳 Informações PIX",
+            description=config.get('pix_info', 'Configure o PIX com .setup'),
             color=discord.Color.gold()
         )
-        embed_pix.set_footer(text="Aguardando comprovante de pagamento...")
-        
-        await btn_interaction.response.send_message(embed=embed_pix)
+        embed_pix.add_field(name="💰 Valor a Pagar", value=f"R$ {produto['preco']}", inline=False)
+        embed_pix.set_footer(text="Após realizar o pagamento, envie o comprovante neste canal")
+        await btn_interaction.response.send_message(embed=embed_pix, ephemeral=True)
     
     aprovar_btn.callback = aprovar_callback
     fechar_btn.callback = fechar_callback
@@ -1349,6 +1334,54 @@ async def criar_carrinho(interaction, produto, prod_id):
     await canal.send(f"{user.mention}", embed=embed_carrinho, view=view)
     
     await interaction.response.send_message(f"✅ Carrinho criado! Acesse {canal.mention}", ephemeral=True)
+
+# Comando para configurar PIX
+@bot.command(name='ConfigPix')
+@is_owner_or_admin()
+async def config_pix(ctx):
+    button = Button(label="Configurar PIX", style=discord.ButtonStyle.primary)
+    
+    modal = Modal(title="Configurar Informações do PIX")
+    
+    pix_input = TextInput(
+        label="Informações do PIX",
+        placeholder="Ex: Chave PIX: seuemail@exemplo.com\nTitular: Seu Nome",
+        style=discord.TextStyle.paragraph,
+        max_length=500
+    )
+    
+    modal.add_item(pix_input)
+    
+    async def on_submit(interaction):
+        config['pix_info'] = pix_input.value
+        save_config(config)
+        
+        embed = discord.Embed(
+            title="✅ PIX Configurado",
+            description="Informações do PIX atualizadas com sucesso!",
+            color=discord.Color.green()
+        )
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    modal.on_submit = on_submit
+    
+    async def button_callback(interaction):
+        # Verificar permissão
+        if interaction.user.id != ctx.guild.owner_id and not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "❌ Você precisa ser Administrador ou Dono do Servidor!",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.send_modal(modal)
+    
+    button.callback = button_callback
+    view = View()
+    view.add_item(button)
+    
+    await ctx.send("💳 Clique no botão para configurar o PIX:", view=view)
 
 # Tratar menções no canal de carrinho
 @bot.event
